@@ -1,0 +1,31 @@
+name: Marktplaats watcher
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - run: python marktplaats_watcher.py
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          CALLMEBOT_PHONE: ${{ secrets.CALLMEBOT_PHONE }}
+          CALLMEBOT_APIKEY: ${{ secrets.CALLMEBOT_APIKEY }}
+          PRICE_THRESHOLD_PCT: "30"
+      - name: Bewaar gezien-lijst
+        run: |
+          git config user.name "marktplaats-watcher"
+          git config user.email "marktplaats-watcher@users.noreply.github.com"
+          git add marktplaats_state.json
+          git diff --cached --quiet || (git commit -m "update state" && git push)
