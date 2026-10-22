@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Volgt de Fok-reeks "[Crowdfunding] #...": zoekt zelf het nieuwste topic en meldt
-nieuwe pre-investeringslinks (ook in spoilers) via ntfy en/of WhatsApp (CallMeBot).
+elke NIEUWE externe link (ook in spoilers) via ntfy en/of WhatsApp (CallMeBot).
+Afbeeldingen, social media, nieuwssites en Fok zelf worden overgeslagen.
 """
 import json
 import os
@@ -12,13 +13,19 @@ import urllib.parse
 import requests
 
 START_TOPIC_ID = "2768031"  # alleen het beginpunt; daarna loopt het script zelf mee
+STATE_VERSION = 2  # bij een andere versie begint het script opnieuw, zonder meldingen
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")
 
-# Een link telt als pre-investeringslink als de URL, de linktekst of de ~250
-# tekens ervoor dit patroon bevatten.
-PATTERN = re.compile(r"pre[-\s]?invest|pre[-\s]?inschrijv|voor[-\s]?inschrijv", re.I)
-
-IGNORE_HOSTS = ("fok.nl", "fokstatic.nl", "fokzine.net", "trickyrock.com", "awin1.com", "bitvavo.com")
+# Hosts die nooit een melding geven (Fok zelf, advertenties, social, media, nieuws)
+IGNORE_HOSTS = (
+    "fok.nl", "fokstatic.nl", "fokzine.net", "trickyrock.com", "awin1.com", "bitvavo.com",
+    "imgur.com", "giphy.com", "tenor.com", "gyazo.com", "prnt.sc", "postimg.cc",
+    "youtube.com", "youtu.be", "twitter.com", "x.com", "facebook.com", "instagram.com",
+    "linkedin.com", "reddit.com", "wikipedia.org", "google.com", "google.nl",
+    "nu.nl", "nos.nl", "ad.nl", "telegraaf.nl", "rtl.nl", "nrc.nl", "volkskrant.nl",
+    "fd.nl", "rtlnieuws.nl", "tweakers.net", "geenstijl.nl", "dumpert.nl",
+)
+IGNORE_EXT = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg", ".mp4")
 
 NTFY_TOPIC = os.environ.get("NTFY_TOPIC")
 CALLMEBOT_PHONE = os.environ.get("CALLMEBOT_PHONE")
@@ -68,26 +75,29 @@ def last_pages(topic_id, first_html):
 def find_links(page_html):
     found = {}
     for m in LINK_RE.finditer(page_html):
-        href, anchor_html = m.group(1), m.group(2)
-        href = href.replace("&amp;", "&")
+        href = m.group(1).replace("&amp;", "&")
         if not href.startswith("http"):
             continue
-        host = urllib.parse.urlparse(href).netloc.lower()
+        parsed = urllib.parse.urlparse(href)
+        host = parsed.netloc.lower()
         if any(host == h or host.endswith("." + h) for h in IGNORE_HOSTS):
             continue
-        before = strip(page_html[max(0, m.start() - 600): m.start()])[-250:]
-        if PATTERN.search(f"{href} {strip(anchor_html)} {before}"):
-            found[href] = before
+        if parsed.path.lower().endswith(IGNORE_EXT):
+            continue
+        before = strip(page_html[max(0, m.start() - 600): m.start()])[-120:]
+        found[href] = before
     return found
 
 
-def notify(url):
-    msg = f"Nieuwe pre-investeringslink in Fok-topic:\n{url}"
+def notify(url, context):
+    msg = f"Nieuwe link in Fok-topic:\n{url}"
+    if context:
+        msg += f"\n\nEr voor: ...{context}"
     if NTFY_TOPIC:
         requests.post(
             f"https://ntfy.sh/{NTFY_TOPIC}",
             data=msg.encode("utf-8"),
-            headers={"Title": "Fok pre-investering", "Click": url, "Priority": "high"},
+            headers={"Title": "Fok crowdfunding link", "Click": url, "Priority": "high"},
             timeout=20,
         )
     if CALLMEBOT_PHONE and CALLMEBOT_APIKEY:
@@ -100,12 +110,13 @@ def notify(url):
 
 
 def main():
-    first_run = not os.path.exists(STATE_FILE)
-    state = {"topic": START_TOPIC_ID, "seen": []}
-    if not first_run:
+    state = {"topic": START_TOPIC_ID, "seen": [], "version": 0}
+    if os.path.exists(STATE_FILE):
         with open(STATE_FILE) as f:
             state.update(json.load(f))
 
+    # Nieuwe versie van het script: bestaande links onthouden zonder te melden
+    first_run = state.get("version") != STATE_VERSION
     topic_id = state["topic"]
     first_html = fetch(f"https://forum.fok.nl/topic/{topic_id}/1/25/")
 
@@ -125,12 +136,12 @@ def main():
     if first_run:
         print(f"Eerste run: {len(new)} bestaande links onthouden, geen meldingen.")
     else:
-        for url in new:
-            notify(url)
+        for url, ctx in new.items():
+            notify(url, ctx)
 
     seen.update(new)
     with open(STATE_FILE, "w") as f:
-        json.dump({"topic": topic_id, "seen": sorted(seen)}, f, indent=1)
+        json.dump({"topic": topic_id, "seen": sorted(seen), "version": STATE_VERSION}, f, indent=1)
 
 
 if __name__ == "__main__":
