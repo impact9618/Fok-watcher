@@ -34,13 +34,16 @@ HEADERS = {
     "Accept-Language": "nl-NL,nl;q=0.9",
 }
 
+# Model + generatie (zonder verplichte GB erin, die zoeken we apart)
 MODEL_RE = re.compile(
     r"i(?:phone|pad)\s*"
     r"(\d+|pro\s*max|pro|air|mini|se)?\s*"
-    r"(pro\s*max|pro|air|mini)?\s*"
-    r"(\d{2,4})\s*gb",
+    r"(pro\s*max|pro|air|mini)?",
     re.I,
 )
+
+# Opslaggrootte ergens los in tekst, bv. "128GB", "128 GB", "128gb"
+STORAGE_RE = re.compile(r"\b(\d{2,4})\s*gb\b", re.I)
 
 # Woorden die op schade/defect wijzen: zo'n advertentie telt niet mee en wordt nooit gemeld.
 DAMAGE_RE = re.compile(
@@ -91,8 +94,28 @@ def condition_bucket(text, item):
     return "nieuw" if NEW_RE.search(text) else "gebruikt"
 
 
-def normalize_group(title, condition):
-    """Herleidt een advertentietitel naar een vergelijkingsgroep, bv. 'iphone 14 pro 256gb gebruikt'."""
+def get_storage_gb(item, text):
+    """Zoekt de opslaggrootte: eerst in Marktplaats' eigen technische kenmerken
+    (meestal betrouwbaarder dan de vrije tekst), anders in titel+beschrijving."""
+    attrs = item.get("attributes") or item.get("extendedAttributes") or []
+    for a in attrs:
+        if isinstance(a, dict):
+            key = str(a.get("key", "")).lower()
+            val = str(a.get("value", ""))
+            if any(w in key for w in ("geheugen", "opslag", "storage", "memory")):
+                m = STORAGE_RE.search(val) or re.search(r"(\d{2,4})", val)
+                if m:
+                    return m.group(1)
+    m = STORAGE_RE.search(text)
+    return m.group(1) if m else None
+
+
+def normalize_group(title, condition, storage_gb):
+    """Herleidt een advertentie naar een vergelijkingsgroep, bv. 'iphone 14 pro 256gb gebruikt'.
+    Zonder bekende opslaggrootte geven we geen groep terug (anders vergelijk je
+    verschillende opslaggroottes onterecht met elkaar)."""
+    if not storage_gb:
+        return None
     t = title.lower()
     is_ipad = "ipad" in t
     m = MODEL_RE.search(t)
@@ -100,7 +123,7 @@ def normalize_group(title, condition):
         return None
     parts = [p for p in m.groups() if p]
     base = "ipad" if is_ipad else "iphone"
-    return f"{base} {' '.join(parts)} {condition}".strip()
+    return f"{base} {' '.join(parts)} {storage_gb}gb {condition}".strip()
 
 
 def fetch_search_json(query):
@@ -218,7 +241,8 @@ def main():
                 continue  # schade/defect: nooit meetellen of melden
 
             condition = condition_bucket(text, item)
-            group = normalize_group(title, condition)
+            storage_gb = get_storage_gb(item, text)
+            group = normalize_group(title, condition, storage_gb)
             if not group or cents is None:
                 continue
             price = cents / 100
