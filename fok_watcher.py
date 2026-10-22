@@ -13,7 +13,7 @@ import urllib.parse
 import requests
 
 START_TOPIC_ID = "2768031"  # alleen het beginpunt; daarna loopt het script zelf mee
-STATE_VERSION = 2  # bij een andere versie begint het script opnieuw, zonder meldingen
+STATE_VERSION = 3  # bij een andere versie begint het script opnieuw, zonder meldingen
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")
 
 # Hosts die nooit een melding geven (Fok zelf, advertenties, social, media, nieuws)
@@ -72,6 +72,13 @@ def last_pages(topic_id, first_html):
     return [last] if last == 1 else [last - 1, last]
 
 
+def has_access_token(url):
+    """Links met ?auth=... (of &auth=...) geven directe pre-investeringstoegang."""
+    query = urllib.parse.urlparse(url).query.lower()
+    params = urllib.parse.parse_qs(query)
+    return any(len(v[0]) > 8 for k, v in params.items() if k in ("auth", "token", "key", "access"))
+
+
 def find_links(page_html):
     found = {}
     for m in LINK_RE.finditer(page_html):
@@ -90,6 +97,8 @@ def find_links(page_html):
 
 
 def notify(url, context):
+    priority = "urgent" if has_access_token(url) else "default"
+    title = "Fok: PRE-INVESTERINGSLINK" if priority == "urgent" else "Fok crowdfunding link"
     msg = f"Nieuwe link in Fok-topic:\n{url}"
     if context:
         msg += f"\n\nEr voor: ...{context}"
@@ -97,7 +106,7 @@ def notify(url, context):
         requests.post(
             f"https://ntfy.sh/{NTFY_TOPIC}",
             data=msg.encode("utf-8"),
-            headers={"Title": "Fok crowdfunding link", "Click": url, "Priority": "high"},
+            headers={"Title": title, "Click": url, "Priority": priority},
             timeout=20,
         )
     if CALLMEBOT_PHONE and CALLMEBOT_APIKEY:
