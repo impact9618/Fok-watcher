@@ -31,9 +31,20 @@ NTFY_TOPIC = os.environ.get("NTFY_TOPIC")
 CALLMEBOT_PHONE = os.environ.get("CALLMEBOT_PHONE")
 CALLMEBOT_APIKEY = os.environ.get("CALLMEBOT_APIKEY")
 
-HEADERS = {"User-Agent": "Mozilla/5.0 (persoonlijke topic-watcher)"}
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "nl-NL,nl;q=0.9",
+    "Referer": "https://forum.fok.nl/",
+}
 LINK_RE = re.compile(r'<a\s[^>]*href="([^"]+)"[^>]*>(.*?)</a>', re.I | re.S)
 TAG_RE = re.compile(r"<[^>]+>")
+
+# Tekst die Fok teruggeeft als een pagina (voor deze aanvraag) niet getoond wordt,
+# bv. omdat Fok een geautomatiseerd verzoek weigert. Zo'n pagina komt gewoon als
+# "succesvol" terug (HTTP 200), dus zonder deze check zou het script dit missen.
+BLOCKED_MARKERS = ("error #52", "Kan dit topic niet weergeven")
 
 
 def fetch(url):
@@ -41,7 +52,10 @@ def fetch(url):
     r.raise_for_status()
     if not r.encoding or r.encoding.lower() == "iso-8859-1":
         r.encoding = "iso-8859-15"
-    return r.text
+    text = r.text
+    if any(marker in text for marker in BLOCKED_MARKERS):
+        raise RuntimeError(f"Fok gaf een foutpagina terug voor {url} (mogelijk geblokkeerd verzoek)")
+    return text
 
 
 def strip(html_text):
