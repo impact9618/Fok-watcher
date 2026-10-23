@@ -46,9 +46,27 @@ TAG_RE = re.compile(r"<[^>]+>")
 # "succesvol" terug (HTTP 200), dus zonder deze check zou het script dit missen.
 BLOCKED_MARKERS = ("error #52", "Kan dit topic niet weergeven")
 
+SESSION = requests.Session()
+SESSION.headers.update(HEADERS)
+_WARMED_UP = False
+
+
+def warm_up():
+    """Bezoekt eerst de homepage, zoals een browser doet, zodat eventuele
+    cookies die Fok daar zet worden meegestuurd bij de volgende verzoeken."""
+    global _WARMED_UP
+    if _WARMED_UP:
+        return
+    try:
+        SESSION.get("https://forum.fok.nl/", timeout=20)
+    except Exception:
+        pass
+    _WARMED_UP = True
+
 
 def fetch(url):
-    r = requests.get(url, headers=HEADERS, timeout=20)
+    warm_up()
+    r = SESSION.get(url, timeout=20)
     r.raise_for_status()
     if not r.encoding or r.encoding.lower() == "iso-8859-1":
         r.encoding = "iso-8859-15"
