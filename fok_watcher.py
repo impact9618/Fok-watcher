@@ -66,10 +66,14 @@ def find_latest_topic(topic_html, current_id):
     return best[1] if best else current_id
 
 
+PAGES_TO_CHECK = 5  # marge voor als een run een keer wat later draait dan gepland
+
+
 def last_pages(topic_id, first_html):
     nums = [int(n) for n in re.findall(rf"/topic/{topic_id}/(\d+)/25", first_html)]
     last = max(nums) if nums else 1
-    return [last] if last == 1 else [last - 1, last]
+    start = max(1, last - PAGES_TO_CHECK + 1)
+    return list(range(start, last + 1))
 
 
 def has_access_token(url):
